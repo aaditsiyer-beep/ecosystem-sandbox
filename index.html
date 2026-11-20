@@ -1,0 +1,84 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Ecosystem Sandbox</title>
+<style>
+body{margin:0;background:#111;color:#ddd;font:14px sans-serif;display:flex;flex-direction:column;align-items:center}
+canvas{background:#1d2a1d;margin:8px;border:1px solid #333;cursor:crosshair}
+#bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center}
+button{background:#2a2a2a;color:#ddd;border:1px solid #555;padding:6px 10px;cursor:pointer}
+button.on{background:#3b6;color:#000}
+#msg{height:20px;color:#fc6}
+</style></head><body>
+<div id="bar">
+ <span>Tool:</span>
+ <button data-t="plant" class="on">🌱 Plant</button>
+ <button data-t="herb">🐇 Rabbit</button>
+ <button data-t="pred">🦊 Fox</button>
+ <button data-t="cull">☠ Cull area</button>
+ <span>|</span>
+ <button id="speed">Speed x1</button>
+ <button id="reset">Reset</button>
+</div>
+<div id="msg"></div>
+<canvas id="w" width="700" height="450"></canvas>
+<canvas id="g" width="700" height="120"></canvas>
+<div id="stat"></div>
+<script>
+const W=700,H=450,w=document.getElementById('w').getContext('2d'),g=document.getElementById('g').getContext('2d');
+const COL={plant:'#4c4',herb:'#eee',pred:'#e73'};
+let A,hist,tick,tool='plant',speed=1,drought,best=+localStorage.eco_best||0,over,msg='',msgT=0;
+const R=Math.random,dist2=(a,b)=>(a.x-b.x)**2+(a.y-b.y)**2;
+function mk(t,x=R()*W,y=R()*H){A.push({t,x,y,e:t=='plant'?1:50})}
+function reset(){A=[];hist=[];tick=0;drought=0;over=false;
+ for(let i=0;i<150;i++)mk('plant');for(let i=0;i<30;i++)mk('herb');for(let i=0;i<6;i++)mk('pred')}
+function say(s){msg=s;msgT=240}
+function nearest(a,list,r){let b=null,bd=r*r;for(const o of list){const d=dist2(a,o);if(d<bd){bd=d;b=o}}return b}
+function step(){
+ tick++;
+ const P=A.filter(a=>a.t=='plant'),H_=A.filter(a=>a.t=='herb'),F=A.filter(a=>a.t=='pred'),born=[];
+ if(drought>0)drought--;
+ // plants spread
+ if(P.length<500)for(const p of P)if(R()<(drought?0.0008:0.003))
+  born.push({t:'plant',x:Math.min(W,Math.max(0,p.x+(R()-.5)*50)),y:Math.min(H,Math.max(0,p.y+(R()-.5)*50)),e:1});
+ for(const [list,prey,speedv,eatGain,cost,repro] of [[H_,P,1.6,30,0.25,100],[F,H_,2.1,45,0.3,120]]){
+  for(const a of list){
+   a.e-=cost;
+   const tgt=nearest(a,prey,90);
+   let dx,dy;
+   if(tgt){dx=tgt.x-a.x;dy=tgt.y-a.y}else{dx=R()-.5;dy=R()-.5}
+   const l=Math.hypot(dx,dy)||1;a.x=Math.min(W,Math.max(0,a.x+dx/l*speedv));a.y=Math.min(H,Math.max(0,a.y+dy/l*speedv));
+   if(tgt&&dist2(a,tgt)<36&&tgt.e>0){tgt.e=0;a.e=Math.min(160,a.e+eatGain)}
+   if(a.e>repro){a.e-=50;born.push({t:a.t,x:a.x,y:a.y,e:40})}
+  }}
+ A=A.filter(a=>a.e>0).concat(born);
+ // random disasters
+ if(tick%1200==0){const k=R()*3|0;
+  if(k==0){drought=600;say('Drought! Plants grow slowly.')}
+  else if(k==1){A=A.filter(a=>a.t!='herb'||R()>.5);say('Plague hits the rabbits!')}
+  else{const c={x:R()*W,y:R()*H};A=A.filter(a=>dist2(a,c)>110**2);say('Wildfire!')}}
+ if(tick%10==0){hist.push([P.length,H_.length,F.length]);if(hist.length>700)hist.shift()}
+ if(!over&&tick>60&&(!P.length||!H_.length||!F.length)){over=true;
+  const y=Math.floor(tick/600);if(y>best){best=y;localStorage.eco_best=y}
+  say('Collapse! You kept all three alive for '+y+' years (best '+best+'). Press Reset.')}
+}
+function draw(){
+ w.clearRect(0,0,W,H);
+ if(drought){w.fillStyle='rgba(180,140,40,.15)';w.fillRect(0,0,W,H)}
+ for(const a of A){w.fillStyle=COL[a.t];const s=a.t=='plant'?2:a.t=='herb'?3:5;w.fillRect(a.x-s/2,a.y-s/2,s,s)}
+ g.clearRect(0,0,700,120);
+ const mx=Math.max(50,...hist.flat());
+ [0,1,2].forEach(i=>{g.strokeStyle=Object.values(COL)[i];g.beginPath();
+  hist.forEach((h,x)=>{const y=118-h[i]/mx*114;x?g.lineTo(x,y):g.moveTo(x,y)});g.stroke()});
+ const c=t=>A.filter(a=>a.t==t).length;
+ document.getElementById('stat').textContent=`Year ${Math.floor(tick/600)} | 🌱 ${c('plant')}  🐇 ${c('herb')}  🦊 ${c('pred')} | best ${best} yrs`;
+ if(msgT>0){msgT--;document.getElementById('msg').textContent=msg}else document.getElementById('msg').textContent='';
+}
+function loop(){if(!over)for(let i=0;i<speed;i++)step();draw();requestAnimationFrame(loop)}
+document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tool=b.dataset.t;document.querySelectorAll('[data-t]').forEach(x=>x.classList.toggle('on',x==b))});
+document.getElementById('speed').onclick=e=>{speed=speed==1?3:speed==3?8:1;e.target.textContent='Speed x'+speed};
+document.getElementById('reset').onclick=reset;
+document.getElementById('w').onclick=e=>{
+ const r=e.target.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
+ if(tool=='cull')A=A.filter(a=>dist2(a,{x,y})>40**2);
+ else for(let i=0;i<(tool=='plant'?8:3);i++)mk(tool,x+(R()-.5)*30,y+(R()-.5)*30)};
+reset();loop();
+</script></body></html>
